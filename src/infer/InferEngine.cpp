@@ -74,9 +74,9 @@ namespace {
     }
 }
 
-InferEngine::InferEngine(const Options& opt)
+InferEngine::InferEngine(Ort::Env& env, const Options& opt)
     : opt_(opt),
-    env_(ORT_LOGGING_LEVEL_WARNING, "CppInferDemo") { }
+    env_(env) { }
 
 void InferEngine::LoadModel(const std::wstring& model_path) {
     session_opt_ = Ort::SessionOptions{};  // 确保可重复 Load / Reload

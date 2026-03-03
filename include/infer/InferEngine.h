@@ -9,6 +9,13 @@
 #include "letterbox.h"
 #include "Infer_result.h"
 
+struct InferResult {
+    std::vector<Ort::Value> outputs; // 原始模型输出
+    LetterBoxInfo lb;                // letterbox
+    int orig_w = 0;
+    int orig_h = 0;
+};
+
 class InferEngine {
 public:
     struct Options {
@@ -18,7 +25,7 @@ public:
         int intra_op_num_threads = 0; // 0=ORT 自己决定
     };
 
-    explicit InferEngine(const Options& opt = Options());
+    explicit InferEngine(Ort::Env& env, const Options& opt = Options());
 
     void LoadModel(const std::wstring& model_path);
 
@@ -36,11 +43,13 @@ public:
 private:
     std::vector<float> PreprocessToCHW(const cv::Mat& bgr, LetterBoxInfo& lb) const;
 
+public:
+    Ort::Env& env_;
 private:
     Options opt_;
     int input_w_ = 0, input_h_ = 0;
 
-    Ort::Env env_;
+    //Ort::Env env_;
     Ort::SessionOptions session_opt_;
     Ort::Session session_{ nullptr };
 

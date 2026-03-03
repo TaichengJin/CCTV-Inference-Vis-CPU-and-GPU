@@ -39,11 +39,6 @@ int main() {
 
         double last_vis_ms = 0.0;
 
-        InferEngine engine(opt);
-        engine.LoadModel(model_path);
-
-
-
         PostprocessOptions pp;
         pp.score_thresh = 0.65f;
 

@@ -1,8 +1,29 @@
+#include <chrono>
+#include <onnxruntime_cxx_api.h>
+
 #include "infer/inference_pool.h"
 #include "video/camera_context.h" 
-#include <chrono>
+#include "infer/postprocess_rtdetr.h"
 
 namespace Inference {
+
+    struct InferencePool::Impl {
+        Ort::Env env{ ORT_LOGGING_LEVEL_WARNING, "CppInferDemo" };
+    };
+
+    InferencePool::InferencePool()
+        : impl_(std::make_unique<Impl>()) { }
+
+    InferencePool::~InferencePool() {
+        StopThreadPool();
+    }
+
+    void InferencePool::Configure(const std::wstring& model_path,
+        const InferEngine::Options& opt)
+    {
+        model_path_ = model_path;
+        opt_ = opt;
+    }
 
     void InferencePool::SetCameras(const std::vector<video::CameraContext*>& cams) {
         // 调用方保证 StopThreadPool() 后再改 cameras
@@ -18,11 +39,21 @@ namespace Inference {
             return;
         }
 
+        const std::wstring model_path = L"models\\rtdetr-l.onnx";
+
+        InferEngine::Options opt;
+        opt.input_w = 640;
+        opt.input_h = 640;
+        opt.use_cuda = false;
+
+        Configure(model_path, opt);
+
         workers_.clear();
         workers_.reserve(static_cast<size_t>(workers_num));
 
         for (int i = 0; i < workers_num; ++i) {
-            workers_.emplace_back([this, i] { WorkerLoop(i); });
+            workers_.emplace_back([this, i] { 
+                WorkerLoop(i); });
         }
     }
 
@@ -33,11 +64,6 @@ namespace Inference {
             return;
         }
 
-        // 唤醒所有 worker 让其退出
-        {
-            std::lock_guard<std::mutex> lk(pool_m_);
-            work_signal_.store(1, std::memory_order_release);
-        }
         pool_cv_.notify_all();
 
         for (auto& t : workers_) {
@@ -49,15 +75,16 @@ namespace Inference {
         // cams_.clear();
     }
 
-    void InferencePool::NotifyWork() {
-        // 发布端在写好某路 infer_pending 后调用即可
-        work_signal_.fetch_add(1, std::memory_order_release);
+    void InferencePool::OnPendingBecameNonEmpty() {
+        // 发布端在写好某路 infer_pending 后调用
+        pending_count_.fetch_add(1, std::memory_order_release);
         pool_cv_.notify_one();
     }
 
     bool InferencePool::TryPopPending(video::CameraContext*& out_ctx,
         video::Frame& out_frame,
         uint64_t& out_seq) {
+        // 防止在引用逻辑修改后第二次循环使用旧值的bug
         out_ctx = nullptr;
         out_seq = 0;
 
@@ -78,11 +105,16 @@ namespace Inference {
 
             if (!ctx->shared.infer_pending.has_value()) continue;
 
-            // move 出来 + reset：消费语义（同一帧只会被一个 worker 拿走）
+            // move出来 + reset，消费语义（同一帧只会被一个 worker 拿走）
+            out_seq = ctx->shared.infer_pending_seq;
+
             out_frame = std::move(*ctx->shared.infer_pending);
             ctx->shared.infer_pending.reset(); // optional的成员函数，触发Frame的析构
 
-            out_seq = ctx->shared.infer_pending_seq;
+            // 为了防止pending count小于0进行断言，稳定后删除
+            auto v = pending_count_.fetch_sub(1, std::memory_order_release) - 1;
+            assert(v >= 0);
+
             out_ctx = ctx;
             return true;
         }
@@ -92,47 +124,54 @@ namespace Inference {
     void InferencePool::WorkerLoop(int worker_id) {
         (void)worker_id;
 
+        InferEngine engine(impl_->env, opt_);
+        engine.LoadModel(model_path_);
+        PostprocessOptions pp;
+        pp.score_thresh = 0.65f;
+
         while (pool_running_.load(std::memory_order_acquire)) {
-            // 1) 等待“可能有活”或 stop
+            // 判断是否有pending或者pool_running_==false则立刻跳出等待并立刻break
             {
                 std::unique_lock<std::mutex> ulk(pool_m_);
                 pool_cv_.wait(ulk, [&] {
                     return !pool_running_.load(std::memory_order_acquire) ||
-                        work_signal_.load(std::memory_order_acquire) > 0;
+                        pending_count_.load(std::memory_order_acquire) > 0;
                     });
 
                 if (!pool_running_.load(std::memory_order_acquire)) break;
             }
 
-            // 2) 抢活：从多路 pending 里拿一帧
             video::CameraContext* ctx = nullptr;
             video::Frame frame;
             uint64_t seq = 0;
 
             bool got = TryPopPending(ctx, frame, seq);
-            if (!got) {
-                // 可能是“虚假唤醒”或其他 worker 已把活拿走
-                // 这里把信号降下去，避免一直热醒
-                work_signal_.store(0, std::memory_order_release);
-                continue;
+            if (!got) continue;
+
+            auto ti0 = std::chrono::steady_clock::now();
+
+            InferResult result = engine.Run(frame.bgr);
+
+            auto dets = PostprocessRTDETR(
+                result.outputs[0],
+                engine.InputW(), engine.InputH(),
+                result.lb,
+                result.orig_w, result.orig_h,
+                pp
+            );
+            auto ti1 = std::chrono::steady_clock::now();
+
+            {
+                std::lock_guard<std::mutex> lk(ctx->shared.stats_m);
+                ctx->shared.stats.infer_ms = std::chrono::duration<double, std::milli>(ti1 - ti0).count();
             }
 
-            // 3) 锁外做慢推理（你先用占位）
-            // TODO: preprocess -> session.Run -> postprocess
-            // 先模拟耗时：
-            // std::this_thread::sleep_for(std::chrono::milliseconds(5));
-
-            // 4) 写回结果（按你的 SharedState 字段自己接）
-            // 例如：
-            // {
-            //     std::lock_guard<std::mutex> lk(ctx->shared.result_m);
-            //     ctx->shared.last_infer_seq = seq;
-            //     ctx->shared.dets = ...;
-            // }
-            // ctx->shared.frame_cv.notify_one(); // 若显示端依赖结果更新，也可以通知
-
-            // 5) 继续循环抢下一帧
+            {
+                std::lock_guard<std::mutex> lk(ctx->shared.det_m);
+                ctx->shared.latest_dets = std::move(dets);
+                ctx->shared.det_seq = seq; // 这份 det 是用哪一帧推理出来的
+            }
         }
     }
 
-} // namespace Inference
+}

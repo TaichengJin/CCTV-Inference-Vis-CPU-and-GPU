@@ -2,10 +2,11 @@
 #include <thread>
 #include "video/camera_manager.h"
 #include "video/camera_context.h"
+#include "infer/inference_pool.h"
 
 namespace video {
 	
-	void video::CameraManager::TickWatchdog()
+	void CameraManager::TickWatchdog()
 	{
 		const int64_t now_us = NowUs();
 
@@ -69,6 +70,8 @@ namespace video {
 			std::this_thread::sleep_for(chunk);
 		}
 	}
+
+	void CameraManager::SetInferencePool(Inference::InferencePool* p) { pool_ = p; }
 
 	/// <summary>
 	/// 参数是指针，thread使用的是cam.get()，查一下区别
@@ -170,13 +173,23 @@ namespace video {
 					now_seq = ++ctx->shared.frame_seq;
 				}
 
+				bool need_notify = false;
+
 				{
 					std::lock_guard<std::mutex> lk(ctx->shared.infer_pending_m);
+					auto was_empty = !ctx->shared.infer_pending.has_value();
 					ctx->shared.infer_pending = std::move(snap);
 					ctx->shared.infer_pending_seq = now_seq;
+
+					need_notify = was_empty;
+				}
+
+				if (need_notify && pool_) {
+					pool_->OnPendingBecameNonEmpty();
 				}
 
 				ctx->shared.frame_cv.notify_one();
+
 
 				continue;
 			}

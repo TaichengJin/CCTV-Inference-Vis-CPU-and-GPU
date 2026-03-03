@@ -1,6 +1,9 @@
 #pragma once
 #include"camera_context.h"
 
+
+namespace Inference { class InferencePool; }
+
 namespace video {
 	class CameraManager {
 	public:
@@ -21,11 +24,17 @@ namespace video {
 			cams_.reserve(n);
 		}
 
+		// 为了简化访问到线程池实例设置此函数
+		void SetInferencePool(Inference::InferencePool* p);
+
 	private:
 		static void DecodeLoop(CameraContext* ctx);
 
 	private:
 		std::vector<std::unique_ptr<CameraContext>> cams_;
+
+		// 为了简化访问到线程池实例设置此指针
+		Inference::InferencePool* pool_ = nullptr;
 	};
 
 }
