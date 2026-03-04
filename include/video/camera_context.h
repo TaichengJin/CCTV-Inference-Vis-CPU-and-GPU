@@ -8,6 +8,7 @@
 #include "ffmpeg_video_source.h"
 #include "common/det.h"
 
+namespace Inference { class InferencePool; }
 namespace video {
 	class CameraContext {
 
@@ -99,6 +100,8 @@ namespace video {
 		std::unique_ptr<video::FFmpegVideoSource> src;
 		std::atomic<bool> thread_running{ false };
 		std::thread th;
+
+		Inference::InferencePool* pool = nullptr;
 
 	};
 }

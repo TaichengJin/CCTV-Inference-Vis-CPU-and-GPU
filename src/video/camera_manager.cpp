@@ -184,8 +184,8 @@ namespace video {
 					need_notify = was_empty;
 				}
 
-				if (need_notify && pool_) {
-					pool_->OnPendingBecameNonEmpty();
+				if (need_notify && ctx->pool) {
+					ctx->pool->OnPendingBecameNonEmpty();
 				}
 
 				ctx->shared.frame_cv.notify_one();
@@ -228,7 +228,11 @@ namespace video {
 		auto cam = std::make_unique<CameraContext>();
 		cam->cam_id = id;
 		cam->url = std::move(url);
+
+		cam->pool = pool_;
+
 		cams_.push_back(std::move(cam));
+		cam_ptrs_.push_back(cams_.back().get());
 	}
 
 	void video::CameraManager::StartAllCams()

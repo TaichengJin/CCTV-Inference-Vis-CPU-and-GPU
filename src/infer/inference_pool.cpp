@@ -39,15 +39,6 @@ namespace Inference {
             return;
         }
 
-        const std::wstring model_path = L"models\\rtdetr-l.onnx";
-
-        InferEngine::Options opt;
-        opt.input_w = 640;
-        opt.input_h = 640;
-        opt.use_cuda = false;
-
-        Configure(model_path, opt);
-
         workers_.clear();
         workers_.reserve(static_cast<size_t>(workers_num));
 
@@ -122,6 +113,7 @@ namespace Inference {
     }
 
     void InferencePool::WorkerLoop(int worker_id) {
+        std::cout << "worker " << worker_id << " started\n";
         (void)worker_id;
 
         InferEngine engine(impl_->env, opt_);
@@ -160,6 +152,7 @@ namespace Inference {
                 pp
             );
             auto ti1 = std::chrono::steady_clock::now();
+            //std::cout << "Finish inference.";
 
             {
                 std::lock_guard<std::mutex> lk(ctx->shared.stats_m);
