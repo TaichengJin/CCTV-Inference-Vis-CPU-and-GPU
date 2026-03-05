@@ -87,9 +87,25 @@ void InferEngine::LoadModel(const std::wstring& model_path) {
         session_opt_.SetIntraOpNumThreads(opt_.intra_op_num_threads);
     }
 
-    // TODO: opt_.use_cuda 为 true 时，在这里加 CUDA provider
+    if (opt_.use_cuda) {
+        std::cout << "Using CUDA Execution Provider\n";
+
+        OrtCUDAProviderOptions cuda_options{};
+        cuda_options.device_id = 0;
+
+        session_opt_.AppendExecutionProvider_CUDA(cuda_options);
+    }
+    else {
+        std::cout << "Using CPU Execution Provider\n";
+    }
 
     session_ = Ort::Session(env_, model_path.c_str(), session_opt_);
+
+    auto providers = Ort::GetAvailableProviders();
+
+    for (auto& p : providers) {
+        std::cout << "Provider: " << p << std::endl;
+    }
 
     // 读取输入输出名
     Ort::AllocatorWithDefaultOptions allocator;

@@ -36,7 +36,7 @@ int main() {
         InferEngine::Options opt;
         opt.input_w = 640;
         opt.input_h = 640;
-        opt.use_cuda = false;
+        opt.use_cuda = true;
         opt.intra_op_num_threads = 0;
 
         double last_vis_ms = 0.0;
@@ -47,17 +47,21 @@ int main() {
         const std::vector<std::string> urls = {
             "rtsp://admin:%40%40admin7434@192.168.1.100:554/0/onvif/profile2/media.smp",
             "rtsp://admin:%40%40admin7434@192.168.1.100:554/0/onvif/profile2/media.smp",
+            "rtsp://admin:%40%40admin7434@192.168.1.100:554/0/onvif/profile2/media.smp",
+            "rtsp://admin:%40%40admin7434@192.168.1.100:554/0/onvif/profile2/media.smp"
         };
         video::CameraManager mgr;
         mgr.Reserve(4);
         mgr.SetInferencePool(&pool);
 
         mgr.AddCamera(0, urls[0]);
-        mgr.AddCamera(1, urls[1]);
+        mgr.AddCamera(1, urls[1]); 
+        mgr.AddCamera(2, urls[2]);
+        mgr.AddCamera(3, urls[3]);
 
         pool.SetCameras(mgr.CameraPtrs());
 
-        pool.StartThreadPool(1);
+        pool.StartThreadPool(2);
         mgr.StartAllCams();
 
         // Display(Main Thread)
